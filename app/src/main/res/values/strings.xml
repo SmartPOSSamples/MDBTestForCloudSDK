@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">MDBTestForJavaDoc</string>
+    <string name="nav_drawer_open">Open navigation drawer</string>
+    <string name="nav_drawer_close">Close navigation drawer</string>
+    <!-- MDBAction -->
+    <string name="plead_wave_your_card">Please wave your card</string>
+    <string name="startPollEvent">Start poll event</string>
+    <string name="vend_approved">Vend approved</string>
+    <string name="vend_denied">Vend denied</string>
+    <string name="vend_cancel">Vend cancel</string>
+    <string name="vend_success">Vend success</string>
+    <string name="vend_failure">Vend failure</string>
+
+
+</resources>
