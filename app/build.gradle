@@ -7,6 +7,7 @@ android {
     defaultConfig {
         applicationId "com.cloudpos.mdbtestforjavadoc"
         minSdk 23
+        //noinspection ExpiredTargetSdkVersion
         targetSdk 29
         versionCode 1
         versionName "1.0"
@@ -38,6 +39,9 @@ android {
     }
     buildFeatures {
         buildConfig true
+    }
+    lint {
+        baseline = file("lint-baseline.xml")
     }
 }
 
