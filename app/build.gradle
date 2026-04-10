@@ -9,8 +9,8 @@ android {
         minSdk 23
         //noinspection ExpiredTargetSdkVersion
         targetSdk 29
-        versionCode 1
-        versionName "1.0"
+        versionCode 3
+        versionName "1.2"
         buildConfigField "boolean", "IS_DEBUG_MODE", "${isDebugMode}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         if (isDebugMode){

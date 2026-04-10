@@ -324,24 +324,12 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
     protected void onStop() {
         super.onStop();
         running = false;
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                close();
-            }
-        }).start();
     }
 
     @Override
     protected void onRestart() {
         super.onRestart();
         running = true;
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                open();
-            }
-        }).start();
 
     }
 
@@ -494,10 +482,6 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
     }
 
     public void startMdb(){
-        if(mdbThread != null && mdbThread.isAlive()){
-            mdbThread.stop();
-            mdbThread = null;
-        }
         mdbThread = new Thread(() -> {
             Looper.prepare();
             open();
@@ -521,14 +505,15 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
                 handler.obtainMessage(MDBUtils.BLACK_LOG, "Init MDB").sendToTarget();
             } catch (DeviceException e) {
                 e.printStackTrace();
+                Thread.currentThread().interrupt();
             }
             running = true;
-            while (running){
+            while (running && !Thread.currentThread().isInterrupted()){
                 try {
                     handler.obtainMessage(MDBUtils.DISABLE_ALL_UI, R.id.btn_mdb_stop).sendToTarget();
                     handler.obtainMessage(MDBUtils.BLACK_LOG, "waiting master command...").sendToTarget();
                     MDBEvent response = extBoardDevice.pollEvent(-1);
-                    handler.obtainMessage(MDBUtils.BLACK_LOG, "recv mdbEvent:" + response.eventType).sendToTarget();
+                    handler.obtainMessage(MDBUtils.GREEN_LOG, "recv mdbEvent:" + response.eventType).sendToTarget();
                     switch (response.eventType){
                         case MDBEvent.TYPE_TRANSACTION_START:
                             if(mdbValues.getOptionalFeature().isAlwaysIdleMdb() && mdbValues.getOptionalFeature().isAlwaysIdleVmc()){
@@ -538,7 +523,7 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
                                 MDBEvent beginsessionEvent = new MDBEvent();
                                 beginsessionEvent.eventType = MDBEvent.TYPE_BEGIN_SESSION;
                                 beginsessionEvent.eventAmount = mdbValues.getBalance();
-                                handler.obtainMessage(MDBUtils.BLACK_LOG, "send beginsession balance: " + beginsessionEvent.eventAmount).sendToTarget();
+                                handler.obtainMessage(MDBUtils.GREEN_LOG, "send beginsession balance: " + beginsessionEvent.eventAmount).sendToTarget();
                                 extBoardDevice.respondEvent(beginsessionEvent);
                             }
                             break;
@@ -546,7 +531,7 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
 
                             break;
                         case MDBEvent.TYPE_VEND_REQUEST:
-                            handler.obtainMessage(MDBUtils.BLACK_LOG, "amount:" + response.eventAmount + ", item:" + response.eventItem + ", " +this.getString(R.string.plead_wave_your_card)).sendToTarget();
+                            handler.obtainMessage(MDBUtils.GREEN_LOG, "amount:" + response.eventAmount + ", item:" + response.eventItem + ", " +this.getString(R.string.plead_wave_your_card)).sendToTarget();
                             handler.obtainMessage(MDBUtils.DIALOG_READCARD, response).sendToTarget();
                             break;
                         case MDBEvent.TYPE_VEND_CANCEL:
@@ -561,7 +546,7 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
                             }
                             break;
                         case MDBEvent.TYPE_VEND_SUCCESS:
-                            handler.obtainMessage(MDBUtils.BLACK_LOG, this.getString(R.string.vend_success)).sendToTarget();
+                            handler.obtainMessage(MDBUtils.GREEN_LOG, this.getString(R.string.vend_success)).sendToTarget();
                             break;
                         case MDBEvent.TYPE_VEND_FAILURE:
                             handler.obtainMessage(MDBUtils.RED_LOG, this.getString(R.string.vend_failure)).sendToTarget();
@@ -601,19 +586,24 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
     }
 
     public void stopMdb(){
-//        mdbThread.interrupt();
         new Thread(() -> {
-            handler.obtainMessage(MDBUtils.DISABLE_ALL_UI).sendToTarget();
-            running = false;
 //            SystemClock.sleep(500);
             try {
-                extBoardDevice.cancelPollEvent();
+                running = false;
                 extBoardDevice.stopLoop();
+//                extBoardDevice.cancelPollEvent();
             } catch (DeviceException e) {
-                throw new RuntimeException(e);
+                e.printStackTrace();
+            }finally {
+                handler.obtainMessage(MDBUtils.DISABLE_ALL_UI).sendToTarget();
+                handler.obtainMessage(MDBUtils.ENABLE_ALL_UI, R.id.btn_mdb_stop).sendToTarget();
+                handler.obtainMessage(MDBUtils.BLACK_LOG, "Mdb stopped").sendToTarget();
+                if(mdbThread != null && !mdbThread.isInterrupted()){
+                    mdbThread.interrupt();
+                    mdbThread = null;
+                }
             }
-            handler.obtainMessage(MDBUtils.ENABLE_ALL_UI, R.id.btn_mdb_stop).sendToTarget();
-            handler.obtainMessage(MDBUtils.BLACK_LOG, "Mdb stopped").sendToTarget();
+
         }).start();
     }
 
@@ -624,11 +614,13 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
         }
 		try {
 			extBoardDevice.open();
+            extBoardDevice.setConfigStateCheck(false);
             onLogSent('d', TAG, "extBoardDevice open success!");
             ret = true;
             open = true;
 		} catch (DeviceException e) {
             onLogSent('e', TAG,"extBoardDevice open failed!");
+            e.printStackTrace();
 //			throw new RuntimeException(e);
 		}
         return ret;
@@ -664,6 +656,7 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
             @Override
             public void run() {
                 try {
+                    open();
                     handler.obtainMessage(MDBUtils.BLACK_LOG, "Mdb version:" + extBoardDevice.getBoardVersion()).sendToTarget();
                 } catch (DeviceException e) {
                     e.printStackTrace();
@@ -1139,7 +1132,7 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
             mdbConfig.decimalPlace = mdbValues.getY();
             extBoardDevice.setConfig(mdbConfig);
         } catch (DeviceException e) {
-            throw new RuntimeException(e);
+            e.printStackTrace();
         }
     }
 
@@ -1151,7 +1144,7 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
             mdbOption.enableNegativeVend = mdbValues.getOptionalFeature().isNegativeVendAllowedMdb();
             extBoardDevice.setOption(mdbOption);
         } catch (DeviceException e) {
-            throw new RuntimeException(e);
+            e.printStackTrace();
         }
     }
 }
