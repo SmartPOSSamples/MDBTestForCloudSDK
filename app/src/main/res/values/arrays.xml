@@ -34,4 +34,13 @@
         <item>device 1</item>
         <item>device 2</item>
     </string-array>
+
+    <string-array name="sniffer_filter">
+        <item>All</item>
+        <item>Cashless #1</item>
+        <item>Cashless #2</item>
+        <item>Bill Validator</item>
+        <item>Coin Hopper #1</item>
+        <item>Coin Hopper #2</item>
+    </string-array>
 </resources>

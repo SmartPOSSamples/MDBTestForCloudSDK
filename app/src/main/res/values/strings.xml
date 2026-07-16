@@ -10,6 +10,8 @@
     <string name="vend_cancel">Vend cancel</string>
     <string name="vend_success">Vend success</string>
     <string name="vend_failure">Vend failure</string>
+    <string name="filter">Filter</string>
+    <string name="hide_poll">Hide Poll</string>
 
 
 </resources>

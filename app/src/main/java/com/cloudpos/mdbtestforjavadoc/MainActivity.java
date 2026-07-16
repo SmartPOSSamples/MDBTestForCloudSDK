@@ -7,6 +7,7 @@ import android.content.DialogInterface;
 import android.os.Bundle;
 import android.os.CountDownTimer;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Message;
 import android.os.SystemClock;
@@ -42,10 +43,14 @@ import com.cloudpos.extboard.bean.MDBConfig;
 import com.cloudpos.extboard.bean.MDBEvent;
 import com.cloudpos.extboard.bean.MDBOption;
 import com.cloudpos.mdbtestforjavadoc.fragment.HomeFragment;
+import com.cloudpos.mdbtestforjavadoc.fragment.SniffsFragment;
 import com.cloudpos.mdbtestforjavadoc.fragment.TransactionFragment;
+import com.cloudpos.mdbtestforjavadoc.util.ByteUtils;
+import com.cloudpos.mdbtestforjavadoc.util.FileHelper;
 import com.cloudpos.rfcardreader.RFCardReaderDevice;
 import com.cloudpos.rfcardreader.RFCardReaderOperationResult;
 import com.cloudpos.sdk.common.SystemProperties;
+import com.cloudpos.sdk.util.StringUtil;
 import com.cloudpos.smartcardreader.SmartCardReaderDevice;
 import com.google.android.material.navigation.NavigationView;
 import com.cloudpos.mdbtestforjavadoc.util.ByteConvertStringUtil;
@@ -56,6 +61,7 @@ import com.cloudpos.mdbtestforjavadoc.values.MDBValues;
 import com.cloudpos.mdbtestforjavadoc.values.OptionalFeature;
 import com.cloudpos.mdbtestforjavadoc.values.PulseValues;
 
+import java.io.File;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -101,7 +107,22 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
     public static final String SUBMODEL_Q3A7 = "q3a7";
     public static final String SUBMODEL_Q3V = "q3v";
     private Thread mdbThread;
+    private boolean isNoSearchCard = false;
+    private boolean snifferrunning = false;
+    private FileHelper fileHelper;
+    private int mFilterAddr = FILTER_ADDR[0];
+    private boolean mHidePoll = false;
 
+    private static final int[] FILTER_ADDR = {
+            -1,    // All — no filter
+            0x10,  // Cashless #1
+            0x60,  // Cashless #2
+            0x30,  // Bill Validator
+            0x58,  // Coin Hopper #1
+            0x70,  // Coin Hopper #2
+    };
+    private HandlerThread mSnifferThread;
+    private Handler mSnifferHandler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -138,6 +159,12 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
                     selectedFragment = getSupportFragmentManager().findFragmentByTag(TransactionFragment.class.getSimpleName());
                     if (selectedFragment == null) {
                         selectedFragment = new TransactionFragment();
+                    }
+                    setFragmentContainerHeight(selectedFragment);
+                }else if (item.getItemId() == R.id.nav_sniffer) {
+                    selectedFragment = getSupportFragmentManager().findFragmentByTag(SniffsFragment.class.getSimpleName());
+                    if (selectedFragment == null) {
+                        selectedFragment = new SniffsFragment();
                     }
                     setFragmentContainerHeight(selectedFragment);
                 }
@@ -318,6 +345,7 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
             mdbValues.setMdbLevel(3);
             mdbValues.getOptionalFeature().setAlwaysIdleMdb(true);
         }
+        fileHelper = new FileHelper(new File("sdcard/mdbtest/sniffslog"));
     }
 
     @Override
@@ -482,6 +510,7 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
     }
 
     public void startMdb(){
+        detectMDBOffline();
         mdbThread = new Thread(() -> {
             Looper.prepare();
             open();
@@ -532,6 +561,10 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
                             break;
                         case MDBEvent.TYPE_VEND_REQUEST:
                             handler.obtainMessage(MDBUtils.GREEN_LOG, "amount:" + response.eventAmount + ", item:" + response.eventItem + ", " +this.getString(R.string.plead_wave_your_card)).sendToTarget();
+                            if(isNoSearchCard){
+                                sendVendApproved(response);
+                                break;
+                            }
                             handler.obtainMessage(MDBUtils.DIALOG_READCARD, response).sendToTarget();
                             break;
                         case MDBEvent.TYPE_VEND_CANCEL:
@@ -586,6 +619,7 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
     }
 
     public void stopMdb(){
+        cancelDetectMDB();
         new Thread(() -> {
 //            SystemClock.sleep(500);
             try {
@@ -879,6 +913,106 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
     }
 
     @Override
+    public void onSniffsStartClicked() {
+        mSnifferThread = new HandlerThread("MDBSnifferThread");
+        mSnifferThread.start();
+        mSnifferHandler = new Handler(mSnifferThread.getLooper());
+
+        mSnifferHandler.post(() -> snifferLoop());
+    }
+
+    private void snifferLoop() {
+        try {
+            open();
+            snifferrunning = true;
+            extBoardDevice.setEnableSniffer(true);
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    findViewById(R.id.btn_sniffs_start).setEnabled(false);
+                    findViewById(R.id.btn_sniffs_stop).setEnabled(true);
+                }
+            });
+            handler.obtainMessage(MDBUtils.BLACK_LOG,  "start Sniffer").sendToTarget();
+            while (snifferrunning){
+                int[] buffer = extBoardDevice.snifferMDBData( -1);
+                if(!snifferrunning){
+                    return;
+                }
+                StringBuilder sb = new StringBuilder();
+                if (buffer.length == 0) {
+                    continue;  // timeout (shouldn't happen with infinite timeout)
+                }
+                // ---- Device filter ----
+                int filterAddr = mFilterAddr;  // volatile read once
+                if (filterAddr >= 0 && buffer.length > 0) {
+                    int addr = (buffer[0] & 0xFFFF) & 0xF8;
+                    if (addr != filterAddr) {
+                        continue;  // skip — doesn't match selected device
+                    }
+                }
+
+                // ---- Hide POLL filter ----
+                if (mHidePoll && buffer.length > 0) {
+                    if (((buffer[0] & 0xFFFF) & 0x07) == 2) {
+                        continue;  // skip POLL responses
+                    }
+                }
+
+                // Format as hex
+                for (int i = 0; i < buffer.length; i++) {
+                    int v = buffer[i] & 0xFFFF;  // treat as unsigned
+                    if (v == 0) {
+                        sb.append("0x00 ");
+                    } else {
+                        sb.append(String.format("0x%X ", v));
+                    }
+                }
+                final String line = sb.toString();
+                fileHelper.write(line +"\n");
+                handler.obtainMessage(MDBUtils.GREEN_LOG,  line).sendToTarget();
+            }
+        } catch (DeviceException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void onSniffsStopClicked() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    snifferrunning = false;
+                    if (mSnifferThread != null) {
+                        mSnifferThread.quitSafely();
+                        try {
+                            mSnifferThread.join(3000);
+                        } catch (InterruptedException e) {
+                            Log.w(TAG, "Interrupted waiting for sniffer thread");
+                        }
+                        mSnifferThread = null;
+                    }
+                    extBoardDevice.cancelSnifferMDBData();
+                    extBoardDevice.setEnableSniffer(false);
+                    handler.obtainMessage(MDBUtils.BLACK_LOG,  "stop Sniffer").sendToTarget();
+                    close();
+                    fileHelper.close();
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            findViewById(R.id.btn_sniffs_start).setEnabled(true);
+                            findViewById(R.id.btn_sniffs_stop).setEnabled(false);
+                        }
+                    });
+                } catch (DeviceException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+    }
+
+    @Override
     public void onTestClicked() {
     }
 
@@ -898,6 +1032,31 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
     }
 
     @Override
+    public void onGetMdbConnStatus() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    open();
+                    int status = extBoardDevice.getMDBConnStatus();
+                    switch (status){
+                        case 0: //offline
+                            handler.obtainMessage(MDBUtils.RED_LOG, "MDB IS OFFLINE").sendToTarget();
+                            break;
+                        case 1: //online
+                            handler.obtainMessage(MDBUtils.GREEN_LOG, "MDB IS ONLINE").sendToTarget();
+                            break;
+                        default:
+                            break;
+                    }
+                } catch (DeviceException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+    }
+
+    @Override
     public void onGetHardwareVersionClicked() {
         getHardwareVersion();
     }
@@ -910,6 +1069,21 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
     @Override
     public void onTransactionFragmentViewCreated(CheckBox cb) {
         setCheckboxStatus(cb);
+    }
+
+    @Override
+    public void onSelectFilter(int position) {
+        mFilterAddr = FILTER_ADDR[position];
+    }
+
+    @Override
+    public void onHidePoll(boolean isChecked) {
+        mHidePoll = isChecked;
+    }
+
+    @Override
+    public void onClear() {
+        textView.setText("");
     }
 
     public void printLogAndText(char c, String s){
@@ -1146,5 +1320,43 @@ public class MainActivity extends AppCompatActivity implements DataSendListener 
         } catch (DeviceException e) {
             e.printStackTrace();
         }
+    }
+
+    private void detectMDBOffline(){
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (running){
+                    try {
+                        int status = extBoardDevice.detectMDBOffline(-1);
+                        switch (status){
+                            case 0: //offline
+                                handler.obtainMessage(MDBUtils.RED_LOG, "MDB IS OFFLINE").sendToTarget();
+                                break;
+                            case 1: //online
+                                handler.obtainMessage(MDBUtils.GREEN_LOG, "MDB IS ONLINE").sendToTarget();
+                                break;
+                            default:
+                                break;
+                        }
+                    } catch (DeviceException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }).start();
+    }
+
+    private void cancelDetectMDB(){
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    extBoardDevice.cancelDetectMDB();
+                } catch (DeviceException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
     }
 }

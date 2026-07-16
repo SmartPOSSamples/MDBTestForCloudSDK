@@ -18,7 +18,7 @@ public class HomeFragment extends Fragment implements View.OnClickListener{
 
 	private Button 	openBtn, closeBtn, btnGetVersion, btnFactoryMode,
 				   	btnTest, btnGetHardwareVersion, btnDiagnoseHardware,
-					btnMdbStart, btnMdbStop;
+					btnMdbStart, btnMdbStop, btnGetMdbConnStatus;
 	private Context context;
 
 	private DataSendListener dataSendListener;
@@ -34,6 +34,7 @@ public class HomeFragment extends Fragment implements View.OnClickListener{
 		btnFactoryMode = (Button) view.findViewById(R.id.btn_factory_mode);
 		btnMdbStart = (Button) view.findViewById(R.id.btn_mdb_start);
 		btnMdbStop = (Button) view.findViewById(R.id.btn_mdb_stop);
+		btnGetMdbConnStatus = (Button) view.findViewById(R.id.btn_get_mdb_conn_status);
 		btnTest = view.findViewById(R.id.btn_test);
 		btnGetHardwareVersion = view.findViewById(R.id.btn_get_hardware_version);
 		btnDiagnoseHardware = view.findViewById(R.id.btn_diagnose_hardware);
@@ -47,6 +48,7 @@ public class HomeFragment extends Fragment implements View.OnClickListener{
 		btnDiagnoseHardware.setOnClickListener(this);
 		btnMdbStart.setOnClickListener(this);
 		btnMdbStop.setOnClickListener(this);
+		btnGetMdbConnStatus.setOnClickListener(this);
 
 		btnMdbStop.setEnabled(false);
 
@@ -94,6 +96,8 @@ public class HomeFragment extends Fragment implements View.OnClickListener{
 				break;
 			case R.id.btn_mdb_stop:
 				dataSendListener.onMdbStopClicked();
+			case R.id.btn_get_mdb_conn_status:
+				dataSendListener.onGetMdbConnStatus();
 				break;
 		}
 	}

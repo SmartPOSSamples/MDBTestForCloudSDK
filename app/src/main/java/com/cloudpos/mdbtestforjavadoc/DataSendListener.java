@@ -19,13 +19,21 @@ public interface DataSendListener {
 	void onDiagnoseHardwareClicked();
 	void onMdbStartClicked();
 	void onMdbStopClicked();
+	void onSniffsStartClicked();
+	void onSniffsStopClicked();
 
 	void onTriggerPulseClicked();
 	void onSetPulseClicked();
 	void onFactoryModeClicked();
+	void onGetMdbConnStatus();
 
 //	void onSetBalanceClicked();
 
 	void onTransactionFragmentViewCreated(CheckBox cb);
 
+	void onSelectFilter(int position);
+
+	void onHidePoll(boolean isChecked);
+
+	void onClear();
 }
